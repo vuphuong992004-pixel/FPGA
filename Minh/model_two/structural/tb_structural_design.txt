@@ -68,12 +68,13 @@ module model_two_structural_tb;
 		#30;
 		force clk1 = 1'b1;
 		#20; sel = 1'b1;
+		#20; sel = 1'b0;
 		#50;
-		release clk1;
-		#50; 
 		release clk2;
+		#50; 
+		release clk1;
 		#100;
-		sel = 0;
+		sel = 1'b1;
 		#100;
         
 
