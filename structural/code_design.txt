@@ -1,0 +1,150 @@
+// D flip-flop with async active-low reset (posedge trigger)
+module dff_pos_async (
+    input wire clk,
+    input wire d,
+    input wire rst_n,
+    output reg q
+);
+    always @(posedge clk or negedge rst_n) begin
+        if(~rst_n) q <= 1'b0;
+        else       q <= d;
+    end
+endmodule
+
+// D flip-flop with async active-low reset (negedge trigger)
+module dff_neg_async (
+    input wire clk,
+    input wire rst_n,
+    input wire d,
+    output reg q
+);
+    always @(negedge clk or negedge rst_n) begin
+        if(~rst_n) q <= 1'b0;
+        else       q <= d;
+    end
+endmodule
+
+// Counter with synchronous clear, increment by 1
+module up_counter #(
+    parameter WIDTH = 4
+)(
+    input wire clk,
+    input wire rst_n,
+    input wire clear,     // synchronous clear
+    input wire inc,       // increment enable
+    output reg [WIDTH-1:0] q
+);
+    always @(posedge clk or negedge rst_n) begin
+        if (~rst_n)
+            q <= {WIDTH{1'b0}};
+        else if (clear)
+            q <= {WIDTH{1'b0}};
+        else if (inc)
+            q <= q + 1'b1;
+    end
+endmodule
+
+// 1-bit AND
+module my_and2  (input wire a, input wire b, output wire y); assign y = a & b; 
+endmodule
+
+// 1-bit OR
+module my_or2   (input wire a, input wire b, output wire y); assign y = a | b; 
+endmodule
+
+// 1-bit NOT
+module not1     (input wire a, output wire y); assign y = ~a; 
+endmodule
+module dff_sync_clear (
+    input wire clk,
+    input wire clear,   // synchronous clear (active high)
+    input wire d,
+    output reg q
+);
+    always @(posedge clk) begin
+        if (~clear)
+            q <= 1'b0;
+        else
+            q <= d;
+    end
+endmodule
+
+//////////////////////////////////////////
+// Structural top module:
+//////////////////////////////////////////
+module model_three (
+    input  wire clk1,
+    input  wire clk2,
+    input  wire sel,
+	 input  wire rst_n,
+    output wire clk_out,
+    output wire [2:0] count1,
+    output wire [4:0] count2
+);
+
+    // --- Declarations ---
+    // Timer shift registers (for disables)
+    wire sel_clk1_ff1_timer, disable_clk2;
+    wire sel_clk2_ff1_timer, disable_clk1;
+
+    // Main CDC D-FF chains
+    wire sel_clk1_ff1, sel_clk1_ff2;
+    wire sel_clk2_ff1, sel_clk2_ff2;
+
+    // Internal nets for logic
+    wire not_sel, not_sel_clk1_ff2, not_sel_clk2_ff2;
+    wire enable1, enable2;
+    wire o_clk1, o_clk2;
+    wire count1_clear, count1_inc;
+    wire count2_clear, count2_inc;
+
+    // --- Functionality ---
+
+    // Timer on clk1 creates disable_clk2
+    dff_pos_async u_en_clk2_ff1 (
+        .clk(clk1), .rst_n(clk2), .d(sel),                .q(sel_clk1_ff1_timer)
+    );
+    dff_pos_async u_en_clk2_ff2 (
+        .clk(clk1), .rst_n(clk2), .d(sel_clk1_ff1_timer), .q(disable_clk2)
+    );
+
+    // Timer on clk2 creates disable_clk1
+    dff_pos_async u_en_clk1_ff1 (
+        .clk(clk2), .rst_n(clk1), .d(not_sel),            .q(sel_clk2_ff1_timer)
+    );
+    dff_pos_async u_en_clk1_ff2 (
+        .clk(clk2), .rst_n(clk1), .d(sel_clk2_ff1_timer), .q(disable_clk1)
+    );
+
+    // Main CDC D-FF chains, with synchronous clear from disables
+    dff_pos_async u_sel_clk1_ff1 (
+        .clk(clk1), .rst_n(rst_n), .d(enable1),      .q(sel_clk1_ff1)
+    );
+    dff_neg_async u_sel_clk1_ff2 (
+        .clk(clk1), .rst_n(rst_n), .d(sel_clk1_ff1), .q(sel_clk1_ff2)
+    );
+
+    dff_pos_async u_sel_clk2_ff1 (
+        .clk(clk2), .rst_n(rst_n ), .d(enable2),      .q(sel_clk2_ff1)
+    );
+    dff_neg_async u_sel_clk2_ff2 (
+        .clk(clk2), .rst_n(rst_n), .d(sel_clk2_ff1), .q(sel_clk2_ff2)
+    );
+
+    // -- Logic for enables
+    not1    u_not_sel          (.a(sel),           .y(not_sel));
+    not1    u_not_sel_clk1_ff2 (.a(sel_clk1_ff2),  .y(not_sel_clk1_ff2));
+    not1    u_not_sel_clk2_ff2 (.a(sel_clk2_ff2),  .y(not_sel_clk2_ff2));
+    my_and2 u_enable1          (.a(not_sel_clk2_ff2), .b(sel),    .y(enable1));
+    my_and2 u_enable2          (.a(not_sel_clk1_ff2), .b(not_sel),.y(enable2));
+	 my_and2 u_o_sel_clk1_ff2		 (.a(sel_clk1_ff2)	 , .b(disable_clk1), .y(o_sel_clk1_ff2) );
+	 my_and2 u_o_sel_clk2_ff2		 (.a(sel_clk2_ff2)	 , .b(disable_clk2), .y(o_sel_clk2_ff2) ); 
+    // Output clock selection logic
+    my_and2  u_o_clk1 (.a(clk1), .b(o_sel_clk1_ff2), .y(o_clk1));
+    my_and2  u_o_clk2 (.a(clk2), .b(o_sel_clk2_ff2), .y(o_clk2));
+    my_or2   u_clk_out(.a(o_clk1), .b(o_clk2),     .y(clk_out));
+
+    // Counters
+
+
+endmodule
