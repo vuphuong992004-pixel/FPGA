@@ -1,0 +1,92 @@
+module model_two_advanced(
+	input wire clk1,
+	input wire clk2,
+	input wire sel,
+	input wire rst_n,
+	output reg clk_out,
+	output wire [2:0] count1,
+	output wire [4:0] count2
+);
+
+	reg sel_clk1_ff1, sel_clk1_ff2;
+	reg sel_clk2_ff1, sel_clk2_ff2;
+	wire enable1 = (~sel_clk2_ff2) & (sel);// out of ff2
+	wire enable2 = (~sel_clk1_ff2) & (~sel);// out of ff2
+	reg [2:0] count1_reg;
+	reg [4:0] count2_reg;
+	assign count1 = count1_reg;
+	assign count2 = count2_reg;
+	always@(posedge clk1 or negedge rst_n) begin
+		if(~rst_n)begin
+			sel_clk1_ff1 <= 1'b0;
+		end else begin
+			sel_clk1_ff1 <= enable1;
+			if(clk2)begin
+				count2_reg <= count2_reg + 1'b1;
+			end else 
+				count2_reg <= 0;
+		end
+	end
+	always@(negedge clk1 or negedge rst_n) begin //ff2
+		if(~rst_n) begin
+			sel_clk1_ff2 <= 1'b0;
+		end else begin
+			sel_clk1_ff2 <= sel_clk1_ff1;
+		end
+	end
+	
+	always@(posedge clk2 or negedge rst_n) begin
+		if(~rst_n) begin 
+			sel_clk2_ff1 <= 1'b0;
+		end else begin
+			sel_clk2_ff1 <= enable2;
+			if(clk1)begin
+				count1_reg <= count1_reg + 1'b1;
+			end else
+				count1_reg <= 0;
+		end
+	end
+	always@(negedge clk2 or negedge rst_n) begin //ff2
+		if(~rst_n) begin
+			sel_clk2_ff2 <= 1'b0;
+		end else begin
+			sel_clk2_ff2 <= sel_clk2_ff1;
+		end
+	end
+	
+	wire o_clk1 = clk1 & sel_clk1_ff2;
+	wire o_clk2 = clk2 & sel_clk2_ff2;
+	parameter SAFE = 1'b0;
+	parameter ACTIVE = 1'b1;
+	reg state, next_state;
+	always@(*)begin
+	   case(state)
+	       SAFE: begin 
+	           if((~sel &&count2_reg >= 5) || (sel && count1_reg >= 5))
+	               next_state = SAFE;
+	           else 
+	               next_state = ACTIVE;
+	       end
+	       ACTIVE: begin
+	           if((~sel &&count2_reg >= 5) || (sel && count1_reg >= 5))
+	               next_state = SAFE;
+	           else
+	               next_state = ACTIVE;
+	       end
+	       default: next_state = SAFE;
+	   endcase 
+	  end
+	  reg disable_clk;
+	  always@(posedge clk1 or posedge clk2 or negedge rst_n) begin
+	    if(!rst_n) state <= SAFE;
+	    else       state <= next_state;
+	  end
+	  always@(*) begin
+	    case (state)
+	       SAFE: disable_clk = 1'b0;
+	       ACTIVE: disable_clk = 1'b1;
+	       default: disable_clk = 1'b0;
+	    endcase
+	   assign clk_out = (o_clk1|o_clk2) & disable_clk;
+	   end
+endmodule

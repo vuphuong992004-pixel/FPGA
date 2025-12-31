@@ -1,0 +1,108 @@
+`timescale 1ns/1ps
+
+module tb_model_two_advanced;
+
+    // Inputs
+    reg clk1;
+    reg clk2;
+    reg sel;
+    reg rst_n;
+
+    // Outputs
+    wire clk_out;
+    wire [2:0] count1;
+    wire [4:0] count2;
+
+    // Instantiate the DUT
+    model_two_advanced uut (
+        .clk1(clk1),
+        .clk2(clk2),
+        .sel(sel),
+        .rst_n(rst_n),
+        .clk_out(clk_out),
+        .count1(count1),
+        .count2(count2)
+    );
+
+    // Clock generation
+    initial clk1 = 0;
+    always #5 clk1 = ~clk1;     // 100 MHz
+
+    initial clk2 = 0;
+    always #7 clk2 = ~clk2;     // ~71.4 MHz
+
+    // Test stimulus
+   initial begin
+        // System Reset
+        rst_n = 0;
+        sel   = 0;
+        #20;
+        rst_n = 1;
+
+        // Start with clk1 selected (sel=0)
+        $display("Time %t: Selecting clk1", $time);
+        sel = 0;
+        #200;
+
+        // Switch to clk2 (sel=1)
+        $display("Time %t: Switching to clk2", $time);
+        sel = 1;
+        #200;
+
+        // Force clk2 stuck high (simulating a dead clock)
+        $display("Time %t: Forcing clk2 stuck high", $time);
+        force clk2 = 1'b1;
+        #200;
+
+        // Switch back to clk1
+        $display("Time %t: Switching back to clk1", $time);
+        sel = 0;
+        #200;
+
+        // Release clk2 to normal toggling again
+        $display("Time %t: Releasing clk2", $time);
+        release clk2;
+        #200;
+		force clk2 = 1'b1;
+		#3;
+		sel = 1;
+		#200;
+		release clk2;
+		#100;
+		sel = 0;
+		#100;
+		force clk2 =1'b1;
+		#20;
+		force clk1 = 1'b1;
+		#20; sel = 1'b1;
+		#100; sel = 1'b0;
+		#50;
+		release clk1;
+		#50; 
+		release clk2;
+		#100;
+        force clk2 = 1'b1;
+        #100;
+        sel = 1'b1;
+        #200;
+        release clk2;
+        #50;
+        
+        $display("Time %t: Test Completed.", $time);
+        $finish;
+    end
+
+    // Enhanced monitor to help debug idle detection
+    initial begin
+        $display("Time\tclk1\tclk2\tsel\trst_n\tcount1\tcount2\tclk_out");
+        $monitor("%0t\t%b\t%b\t%b\t%b\t%d\t%d\t%b",
+                 $time, clk1, clk2, sel, rst_n, count1, count2, clk_out);
+    end
+
+    // Optional: Add waveform dump for better visualization
+    initial begin
+        $dumpfile("tb_model_two_advanced.vcd");
+        $dumpvars(0, tb_model_two_advanced);
+    end
+
+endmodule
