@@ -1,0 +1,91 @@
+`timescale 1ns/1ps
+module tb_mux;
+    reg clk1, clk2, sel, rst_n;
+    wire clk_out;
+	 wire [2:0]count1;
+	 wire [4:0]count2;
+
+    // Instantiate DUT
+    model_two uut(
+        .clk1(clk1),
+        .clk2(clk2),
+        .sel(sel),
+        .rst_n(rst_n),
+		  .count1(count1),
+		  .count2(count2),
+        .clk_out(clk_out)
+    );
+
+    // Clock1: period = 10ns (100MHz)
+    initial begin
+        clk1 = 0;
+        forever #5 clk1 = ~clk1;
+    end
+
+    // Clock2: period = 14ns (~71MHz)
+    initial begin
+        clk2 = 0;
+        forever #7 clk2 = ~clk2;
+    end
+
+    // Stimulus
+    initial begin
+        // System Reset
+        rst_n = 0;
+        sel   = 0;
+        #20;
+        rst_n = 1;
+
+        // Start with clk1 selected (sel=0)
+        $display("Time %t: Selecting clk1", $time);
+        sel = 0;
+        #200;
+
+        // Switch to clk2 (sel=1)
+        $display("Time %t: Switching to clk2", $time);
+        sel = 1;
+        #200;
+
+        // Force clk2 stuck high (simulating a dead clock)
+        $display("Time %t: Forcing clk2 stuck high", $time);
+        force clk2 = 1'b1;
+        #200;
+
+        // Switch back to clk1
+        $display("Time %t: Switching back to clk1", $time);
+        sel = 0;
+        #200;
+
+        // Release clk2 to normal toggling again
+        $display("Time %t: Releasing clk2", $time);
+        release clk2;
+        #200;
+		force clk2 = 1'b1;
+		#3;
+		sel = 1;
+		#200;
+		release clk2;
+		#100;
+		sel = 0;
+		#100;
+		force clk2 =1'b1;
+		#30;
+		force clk1 = 1'b1;
+		#20; sel = 1'b1;
+		#100; sel = 1'b0;
+		#50;
+		release clk1;
+		#50; 
+		release clk2;
+		#100;
+
+        $display("Time %t: Test Completed.", $time);
+        $finish;
+    end
+
+    // Monitor (shows all signals each time something changes)
+    initial begin
+		 $dumpfile("tb_mux.vcd");
+		 $dumpvars(0, tb_mux); // This will now include count1, count2 as top-level signals
+	 end
+endmodule
