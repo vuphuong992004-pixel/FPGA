@@ -1,92 +1,144 @@
 module model_two_advanced(
-	input wire clk1,
-	input wire clk2,
-	input wire sel,
-	input wire rst_n,
-	output reg clk_out,
-	output wire [2:0] count1,
-	output wire [4:0] count2
+    input  wire clk1,
+    input  wire clk2,
+    input  wire sel,
+    input  wire rst_n,       // legacy/global asynchronous reset
+    output reg  rst_n1,      // async reset for clk1 domain FFs
+    output reg  rst_n2,      // async reset for clk2 domain FFs
+    output wire clk_out,
+    output wire [2:0] count1,
+    output wire [4:0] count2
 );
 
-	reg sel_clk1_ff1, sel_clk1_ff2;
-	reg sel_clk2_ff1, sel_clk2_ff2;
-	wire enable1 = (~sel_clk2_ff2) & (sel);// out of ff2
-	wire enable2 = (~sel_clk1_ff2) & (~sel);// out of ff2
-	reg [2:0] count1_reg;
-	reg [4:0] count2_reg;
-	assign count1 = count1_reg;
-	assign count2 = count2_reg;
-	always@(posedge clk1 or negedge rst_n) begin
-		if(~rst_n)begin
-			sel_clk1_ff1 <= 1'b0;
-		end else begin
-			sel_clk1_ff1 <= enable1;
-			if(clk2)begin
-				count2_reg <= count2_reg + 1'b1;
-			end else 
-				count2_reg <= 0;
-		end
-	end
-	always@(negedge clk1 or negedge rst_n) begin //ff2
-		if(~rst_n) begin
-			sel_clk1_ff2 <= 1'b0;
-		end else begin
-			sel_clk1_ff2 <= sel_clk1_ff1;
-		end
-	end
-	
-	always@(posedge clk2 or negedge rst_n) begin
-		if(~rst_n) begin 
-			sel_clk2_ff1 <= 1'b0;
-		end else begin
-			sel_clk2_ff1 <= enable2;
-			if(clk1)begin
-				count1_reg <= count1_reg + 1'b1;
-			end else
-				count1_reg <= 0;
-		end
-	end
-	always@(negedge clk2 or negedge rst_n) begin //ff2
-		if(~rst_n) begin
-			sel_clk2_ff2 <= 1'b0;
-		end else begin
-			sel_clk2_ff2 <= sel_clk2_ff1;
-		end
-	end
-	
-	wire o_clk1 = clk1 & sel_clk1_ff2;
-	wire o_clk2 = clk2 & sel_clk2_ff2;
-	parameter SAFE = 1'b0;
-	parameter ACTIVE = 1'b1;
-	reg state, next_state;
-	always@(*)begin
-	   case(state)
-	       SAFE: begin 
-	           if((~sel &&count2_reg >= 5) || (sel && count1_reg >= 5))
-	               next_state = SAFE;
-	           else 
-	               next_state = ACTIVE;
-	       end
-	       ACTIVE: begin
-	           if((~sel &&count2_reg >= 5) || (sel && count1_reg >= 5))
-	               next_state = SAFE;
-	           else
-	               next_state = ACTIVE;
-	       end
-	       default: next_state = SAFE;
-	   endcase 
-	  end
-	  reg disable_clk;
-	  always@(posedge clk1 or posedge clk2 or negedge rst_n) begin
-	    if(!rst_n) state <= SAFE;
-	    else       state <= next_state;
-	  end
-	  always@(*) begin
-	    case (state)
-	       SAFE: disable_clk = 1'b0;
-	       ACTIVE: disable_clk = 1'b1;
-	       default: disable_clk = 1'b0;
-	    endcase
-	   assign clk_out = (o_clk1|o_clk2) & disable_clk;
-	   end
+    //============================================================
+    // Flip-flops and enables
+    //============================================================
+    reg sel_clk1_ff1, sel_clk1_ff2;
+    reg sel_clk2_ff1, sel_clk2_ff2;
+
+    wire enable1 = (~sel_clk2_ff2) & sel;
+    wire enable2 = (~sel_clk1_ff2) & ~sel;
+
+    //============================================================
+    // Counters
+    //============================================================
+    reg [2:0] count1_reg;
+    reg [4:0] count2_reg;
+    assign count1 = count1_reg;
+    assign count2 = count2_reg;
+
+    //============================================================
+    // Synchronizer for 'sel' (clk1 domain)
+    //============================================================
+    localparam SYNCH_DELAY = 3; //3 flip flops
+    reg [SYNCH_DELAY-1:0] sel_sync1;
+
+    always @(posedge clk1 or negedge rst_n) begin
+        if (~rst_n)
+            sel_sync1 <= {SYNCH_DELAY{1'b0}}; //3'b000
+        else
+            sel_sync1 <= {sel_sync1[SYNCH_DELAY-2:0], sel}; // push from tail. New way to write flipflop:)
+    end
+
+    wire synced_sel_out = sel_sync1[SYNCH_DELAY-1];
+
+    //============================================================
+    // clk1 domain
+    //============================================================
+    always @(posedge clk1 or negedge rst_n1) begin
+        if (~rst_n1) begin
+            sel_clk1_ff1 <= 1'b0;
+            count2_reg   <= 5'b0;
+        end else begin
+            sel_clk1_ff1 <= enable1;
+            if (clk2)
+                count2_reg <= count2_reg + 1'b1;
+            else
+                count2_reg <= 5'b0;
+        end
+    end
+
+    always @(negedge clk1 or negedge rst_n1) begin
+        if (~rst_n1)
+            sel_clk1_ff2 <= 1'b0;
+        else
+            sel_clk1_ff2 <= sel_clk1_ff1;
+    end
+
+    //============================================================
+    // clk2 domain
+    //============================================================
+    always @(posedge clk2 or negedge rst_n2) begin
+        if (~rst_n2) begin
+            sel_clk2_ff1 <= 1'b0;
+            count1_reg   <= 3'b0;
+        end else begin
+            sel_clk2_ff1 <= enable2;
+            if (clk1)
+                count1_reg <= count1_reg + 1'b1;
+            else
+                count1_reg <= 3'b0;
+        end
+    end
+
+    always @(negedge clk2 or negedge rst_n2) begin
+        if (~rst_n2)
+            sel_clk2_ff2 <= 1'b0;
+        else
+            sel_clk2_ff2 <= sel_clk2_ff1;
+    end
+
+    //============================================================
+    // Clock mux
+    //============================================================
+    wire o_clk1 = clk1 & sel_clk1_ff2;
+    wire o_clk2 = clk2 & sel_clk2_ff2;
+    assign clk_out = o_clk1 | o_clk2;
+
+    //============================================================
+    // FSM controlling domain resets
+    //============================================================
+    localparam SAFE   = 1'b0;
+    localparam ACTIVE = 1'b1;
+
+    reg state, next_state;
+
+    // Next-state logic
+    always @(*) begin
+        case (state)
+            SAFE: begin
+                if ((~synced_sel_out && count2_reg >= 3) ||
+                    ( synced_sel_out && count1_reg >= 3)) //synchronize sel with count  
+                    next_state = SAFE;
+                else
+                    next_state = ACTIVE;
+            end
+            ACTIVE: begin
+                if ((~synced_sel_out && count2_reg >= 3) ||
+                    ( synced_sel_out && count1_reg >= 3))
+                    next_state = SAFE;
+                else
+                    next_state = ACTIVE;
+            end
+            default: next_state = SAFE;
+        endcase
+    end
+
+    // State register (use global reset)
+    always @(posedge clk1 or negedge rst_n) begin
+        if (~rst_n)
+            state <= SAFE;
+        else
+            state <= next_state;
+    end
+
+    // Output logic for domain resets
+    always @(*) begin
+        case (state)
+            SAFE:   begin rst_n1 = 1'b0; rst_n2 = 1'b0; end
+            ACTIVE: begin rst_n1 = 1'b1; rst_n2 = 1'b1; end
+            default:begin rst_n1 = 1'b0; rst_n2 = 1'b0; end
+        endcase
+    end
+
 endmodule
