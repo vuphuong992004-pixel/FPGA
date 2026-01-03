@@ -1,3 +1,5 @@
-#comments for model_two_advanced.
-Using this clk to reference other clk and combining with FSM is my idea. However, bugs here are not synchronize with variable 'sel' and both clk1 and clk2 die (at high level too long).
-I will try to refer from model_three (with 8 flipflops) and try to fix the problem "synchronize with variable 'sel'" first. 
+//upgrade for the proposed way:
+- be able to apply fsm and synchronize with sel. This way seems like in the paper that contain model_three. You guys can totally check the image of model in model_three folder
+- Here's my idea to solve the problem both of two clock get stuck at high level when counter have not reached to threshold yet (I set threshold here is 3):
+  + I think I can apply some combinational logic for clk_out to checkout when count goes from 0 to 2.
+  + Or maybe, this thinking path is not good. I will all of this thinking into trash and find a new way from flipflop couple cross.
