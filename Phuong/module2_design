@@ -1,0 +1,137 @@
+`timescale 1ns/1ps
+module glitch_free_clk_mux_v2 (
+    input wire clk1,
+    input wire clk2,
+    input wire sel,
+    input wire rst_n,
+    output reg clk_out,
+    output reg recovery_active,
+    output reg deadlock_detected,
+    // Debug signals
+    output reg en1,
+    output reg en2,
+    output wire [5:0] mpd_counter,
+    output wire [7:0] watchdog_counter
+);
+    // ======================================
+    // 1. SYNCHRONIZERS (3-stage)
+    reg sel_sync1_clk1, sel_sync2_clk1, sel_sync3_clk1;
+    reg sel_sync1_clk2, sel_sync2_clk2, sel_sync3_clk2;
+    always @(posedge clk1 or negedge rst_n) begin
+        if (!rst_n) {sel_sync1_clk1, sel_sync2_clk1, sel_sync3_clk1} <= 3'b000;
+        else {sel_sync1_clk1, sel_sync2_clk1, sel_sync3_clk1} <= {sel, sel_sync1_clk1, sel_sync2_clk1};
+    end
+    always @(posedge clk2 or negedge rst_n) begin
+        if (!rst_n) {sel_sync1_clk2, sel_sync2_clk2, sel_sync3_clk2} <= 3'b000;
+        else {sel_sync1_clk2, sel_sync2_clk2, sel_sync3_clk2} <= {sel, sel_sync1_clk2, sel_sync2_clk2};
+    end
+    wire sel_to_clk1 = sel_sync3_clk1;
+    wire sel_to_clk2 = sel_sync3_clk2;
+
+    // ======================================
+    // 2. CROSS-DOMAIN ENABLE SYNC
+       reg en2_sync1_clk1, en2_sync2_clk1, en2_sync3_clk1;
+    reg en1_sync1_clk2, en1_sync2_clk2, en1_sync3_clk2;
+    always @(posedge clk1 or negedge rst_n) begin
+        if (!rst_n) {en2_sync1_clk1, en2_sync2_clk1, en2_sync3_clk1} <= 3'b000;
+        else {en2_sync1_clk1, en2_sync2_clk1, en2_sync3_clk1} <= {en2, en2_sync1_clk1, en2_sync2_clk1};
+    end
+    always @(posedge clk2 or negedge rst_n) begin
+        if (!rst_n) {en1_sync1_clk2, en1_sync2_clk2, en1_sync3_clk2} <= 3'b000;
+        else {en1_sync1_clk2, en1_sync2_clk2, en1_sync3_clk2} <= {en1, en1_sync1_clk2, en1_sync2_clk2};
+    end
+    wire en2_synced_to_clk1 = en2_sync3_clk1;
+    wire en1_synced_to_clk2 = en1_sync3_clk2;
+
+    // ======================================
+    // 3. ENABLE LOGIC (Glitch-Free, Mutual Exclusion, Negedge Switch)
+        always @(negedge clk1 or negedge rst_n) begin
+        if (!rst_n) en1 <= 1'b1;  // Sau reset mặc định chọn clk1
+        else en1 <= (~sel_to_clk1) && (~en2_synced_to_clk1);
+    end
+    always @(negedge clk2 or negedge rst_n) begin
+        if (!rst_n) en2 <= 1'b0;
+        else en2 <= (sel_to_clk2) && (~en1_synced_to_clk2);
+    end
+
+    wire normal_clk_out = (clk1 & en1) | (clk2 & en2);
+
+    // ======================================
+    // 4. MONITORING (MPD & Watchdog)
+    reg [5:0] mpd_cnt1, mpd_cnt2;
+    reg mpd_fail;
+    always @(posedge clk1 or negedge rst_n) begin
+        if (!rst_n) mpd_cnt1 <= 0;
+        else mpd_cnt1 <= en1 ? mpd_cnt1 + 1 : 0;
+    end
+    always @(posedge clk2 or negedge rst_n) begin
+        if (!rst_n) mpd_cnt2 <= 0;
+        else mpd_cnt2 <= en2 ? mpd_cnt2 + 1 : 0;
+    end
+    always @(*) mpd_fail = (mpd_cnt1 == 6'd63) || (mpd_cnt2 == 6'd63);
+
+    // Watchdog giám sát sự thay đổi của clk_out
+    reg [7:0] wd_timer;
+    reg last_clk_out;
+    always @(posedge clk1 or negedge rst_n) begin
+        if (!rst_n) begin
+            wd_timer <= 0;
+            last_clk_out <= 0;
+        end else begin
+            last_clk_out <= clk_out;
+            if (clk_out != last_clk_out) wd_timer <= 0;
+            else if (wd_timer < 255) wd_timer <= wd_timer + 1;
+        end
+    end
+    wire wd_fail = (wd_timer == 8'd255);
+
+    assign mpd_counter = mpd_cnt1 | mpd_cnt2;
+    assign watchdog_counter = wd_timer;
+
+    // ======================================
+    // 5. RECOVERY FSM (Force low + Wait for stability)
+    reg [1:0] state;
+    reg [3:0] wait_cnt;
+    localparam S_NORMAL  = 2'b00,
+               S_RECOVERY = 2'b01,
+               S_WAIT     = 2'b10;
+
+    always @(posedge clk1 or negedge rst_n) begin
+        if (!rst_n) begin
+            state <= S_NORMAL;
+            clk_out <= 0;
+            recovery_active <= 0;
+            deadlock_detected <= 0;
+            wait_cnt <= 0;
+        end else begin
+            case (state)
+                S_NORMAL: begin
+                    clk_out <= normal_clk_out;
+                    recovery_active <= 0;
+                    if (wd_fail || mpd_fail) begin
+                        state <= S_RECOVERY;
+                        deadlock_detected <= 1;
+                    end
+                end
+                S_RECOVERY: begin
+                    clk_out <= 0;
+                    recovery_active <= 1;
+                    if (!wd_fail && !mpd_fail) begin
+                        state <= S_WAIT;
+                        wait_cnt <= 0;
+                    end
+                end
+                S_WAIT: begin  // Chờ 16 chu kỳ clk1 để chắc chắn ổn định
+                    clk_out <= 0;
+                    recovery_active <= 1;
+                    wait_cnt <= wait_cnt + 1;
+                    if (wait_cnt == 4'd15) begin
+                        state <= S_NORMAL;
+                        deadlock_detected <= 0;
+                    end
+                end
+                default: state <= S_NORMAL;
+            endcase
+        end
+    end
+endmodule
