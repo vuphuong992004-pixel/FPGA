@@ -6,8 +6,10 @@ module model_two_advanced(
     output reg  rst_n1,      // async reset for clk1 domain FFs
     output reg  rst_n2,      // async reset for clk2 domain FFs
     output wire clk_out,
+    output wire clk_out1,
     output wire [2:0] count1,
-    output wire [4:0] count2
+    output wire [4:0] count2,
+    output wire state_dbg 
 );
 
     //============================================================
@@ -30,7 +32,7 @@ module model_two_advanced(
     //============================================================
     // Synchronizer for 'sel' (clk1 domain)
     //============================================================
-    localparam SYNCH_DELAY = 3; //3 flip flops
+ /*   localparam SYNCH_DELAY = 3; //3 flip flops
     reg [SYNCH_DELAY-1:0] sel_sync1;
 
     always @(posedge clk1 or negedge rst_n) begin
@@ -40,7 +42,33 @@ module model_two_advanced(
             sel_sync1 <= {sel_sync1[SYNCH_DELAY-2:0], sel}; // push from tail. New way to write flipflop:)
     end
 
-    wire synced_sel_out = sel_sync1[SYNCH_DELAY-1];
+    wire synced_sel_out = sel_sync1[SYNCH_DELAY-1];*/
+    //============================================================
+// Detect posedge of clk1 and clk2
+//============================================================
+
+// Registers to hold previous values
+    reg clk1_d, clk2_d;
+    
+   //detect changing of clk1 and clk2
+    always @(posedge clk1 or negedge rst_n) begin
+        if (~rst_n)
+            clk1_d <= 1'b0;
+        else
+            clk1_d <= clk1;
+    end
+    
+    always @(posedge clk2 or negedge rst_n) begin
+        if (~rst_n)
+            clk2_d <= 1'b0;
+        else
+            clk2_d <= clk2;
+    end
+    
+    // Rising edge detection signals
+    wire clk1_detect = clk1 ^ clk1_d;
+    wire clk2_detect = clk2 ^ clk2_d;
+
 
     //============================================================
     // clk1 domain
@@ -91,13 +119,17 @@ module model_two_advanced(
     //============================================================
     // Clock mux
     //============================================================
-    wire o_clk1 = clk1 & sel_clk1_ff2;
-    wire o_clk2 = clk2 & sel_clk2_ff2;
-    assign clk_out = o_clk1 | o_clk2;
+/*    if 
+    
+    assign clk_out = clk1 & sel_clk1_ff2 | sel_clk2_ff2;
+    end*/
 
     //============================================================
     // FSM controlling domain resets
     //============================================================
+    assign clk_out = (clk1 & sel_clk1_ff2) | (clk2 & sel_clk2_ff2);
+    assign clk_out1 = (~clk1 & sel_clk1_ff2) | (~clk2 & sel_clk2_ff2);
+    
     localparam SAFE   = 1'b0;
     localparam ACTIVE = 1'b1;
 
@@ -107,17 +139,16 @@ module model_two_advanced(
     always @(*) begin
         case (state)
             SAFE: begin
-                if ((~synced_sel_out && count2_reg >= 3) ||
-                    ( synced_sel_out && count1_reg >= 3)) //synchronize sel with count  
-                    next_state = SAFE;
-                else
+                if ((sel && clk1_detect) || (~sel && clk2_detect))
                     next_state = ACTIVE;
+                else 
+                    next_state = SAFE;
             end
             ACTIVE: begin
-                if ((~synced_sel_out && count2_reg >= 3) ||
-                    ( synced_sel_out && count1_reg >= 3))
+                if ((~sel && count2_reg >= 3) ||
+                    ( sel && count1_reg >= 3))
                     next_state = SAFE;
-                else
+                else if ((sel && clk1_detect) || (~sel && clk2_detect))
                     next_state = ACTIVE;
             end
             default: next_state = SAFE;
@@ -125,7 +156,7 @@ module model_two_advanced(
     end
 
     // State register (use global reset)
-    always @(posedge clk1 or negedge rst_n) begin
+    always @(posedge clk1 or negedge rst_n) begin //ok delay
         if (~rst_n)
             state <= SAFE;
         else
@@ -140,5 +171,6 @@ module model_two_advanced(
             default:begin rst_n1 = 1'b0; rst_n2 = 1'b0; end
         endcase
     end
+    assign state_dbg = state;
 
 endmodule
