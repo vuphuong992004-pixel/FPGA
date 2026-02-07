@@ -1,176 +1,195 @@
-module model_two_advanced(
+module dff_async (
+    input  wire clk,
+    input  wire rst_n,
+    input  wire d,
+    output reg  q
+);
+    always @(posedge clk or negedge rst_n) begin
+        if (~rst_n) q <= 1'b0;
+        else        q <= d;
+    end
+endmodule
+
+module counter #(parameter WIDTH=4) (
+    input  wire clk,
+    input  wire rst_n,
+    input  wire inc,
+    input  wire clr,
+    output reg [WIDTH-1:0] q
+);
+    always @(posedge clk or negedge rst_n) begin
+        if (~rst_n) q <= {WIDTH{1'b0}};
+        else if (clr) q <= {WIDTH{1'b0}};
+        else if (inc) q <= q + 1'b1;
+    end
+endmodule
+
+module clk_detect_block (
     input  wire clk1,
     input  wire clk2,
-    input  wire sel,
-    input  wire rst_n,       // legacy/global asynchronous reset
-    output reg  rst_n1,      // async reset for clk1 domain FFs
-    output reg  rst_n2,      // async reset for clk2 domain FFs
-    output wire clk_out,
-    output wire clk_out1,
-    output wire [2:0] count1,
-    output wire [4:0] count2,
-    output wire state_dbg 
+    input  wire rst_n,
+    output wire clk1_detect,
+    output wire clk2_detect
 );
+    wire clk1_d, clk2_d;
 
-    //============================================================
-    // Flip-flops and enables
-    //============================================================
-    reg sel_clk1_ff1, sel_clk1_ff2;
-    reg sel_clk2_ff1, sel_clk2_ff2;
+    dff_async u_clk1_dff (.clk(clk2), .rst_n(rst_n), .d(clk1), .q(clk1_d));
+    dff_async u_clk2_dff (.clk(clk1), .rst_n(rst_n), .d(clk2), .q(clk2_d));
 
-    wire enable1 = (~sel_clk2_ff2) & sel;
-    wire enable2 = (~sel_clk1_ff2) & ~sel;
+    assign clk1_detect = clk1 ^ clk1_d;
+    assign clk2_detect = clk2 ^ clk2_d;
+endmodule
 
-    //============================================================
-    // Counters
-    //============================================================
-    reg [2:0] count1_reg;
-    reg [4:0] count2_reg;
-    assign count1 = count1_reg;
-    assign count2 = count2_reg;
-
-    //============================================================
-    // Synchronizer for 'sel' (clk1 domain)
-    //============================================================
- /*   localparam SYNCH_DELAY = 3; //3 flip flops
-    reg [SYNCH_DELAY-1:0] sel_sync1;
-
-    always @(posedge clk1 or negedge rst_n) begin
-        if (~rst_n)
-            sel_sync1 <= {SYNCH_DELAY{1'b0}}; //3'b000
-        else
-            sel_sync1 <= {sel_sync1[SYNCH_DELAY-2:0], sel}; // push from tail. New way to write flipflop:)
-    end
-
-    wire synced_sel_out = sel_sync1[SYNCH_DELAY-1];*/
-    //============================================================
-// Detect posedge of clk1 and clk2
+//============================================================
+// Counter block
 //============================================================
 
-// Registers to hold previous values
-    reg clk1_d, clk2_d;
-    
-   //detect changing of clk1 and clk2
-    always @(posedge clk1 or negedge rst_n) begin
-        if (~rst_n)
-            clk1_d <= 1'b0;
-        else
-            clk1_d <= clk1;
-    end
-    
-    always @(posedge clk2 or negedge rst_n) begin
-        if (~rst_n)
-            clk2_d <= 1'b0;
-        else
-            clk2_d <= clk2;
-    end
-    
-    // Rising edge detection signals
-    wire clk1_detect = clk1 ^ clk1_d;
-    wire clk2_detect = clk2 ^ clk2_d;
 
+module counter_block (
+    input  wire clk1,
+    input  wire clk2,
+    input  wire rst_n1,
+    input  wire rst_n2,
+    input  wire clk1_detect,
+    input  wire clk2_detect,
+    output wire [2:0] count1,
+    output wire [4:0] count2
+);
+    counter #(.WIDTH(3)) count1_inst (
+        .clk(clk2),
+        .rst_n(rst_n2),
+        .inc(~clk1_detect),
+        .clr(clk1_detect),
+        .q(count1)
+    );
 
-    //============================================================
-    // clk1 domain
-    //============================================================
-    always @(posedge clk1 or negedge rst_n1) begin
-        if (~rst_n1) begin
-            sel_clk1_ff1 <= 1'b0;
-            count2_reg   <= 5'b0;
-        end else begin
-            sel_clk1_ff1 <= enable1;
-            if (clk2)
-                count2_reg <= count2_reg + 1'b1;
-            else
-                count2_reg <= 5'b0;
-        end
-    end
+    counter #(.WIDTH(5)) count2_inst (
+        .clk(clk1),
+        .rst_n(rst_n1),
+        .inc(~clk2_detect),
+        .clr(clk2_detect),
+        .q(count2)
+    );
+endmodule
 
-    always @(negedge clk1 or negedge rst_n1) begin
-        if (~rst_n1)
-            sel_clk1_ff2 <= 1'b0;
-        else
-            sel_clk1_ff2 <= sel_clk1_ff1;
-    end
+//============================================================
+// FSM controller with enable outputs
+//============================================================
+module fsm_controller (
+    input  wire clk,
+    input  wire rst_n,
+    input  wire sel,
+    input  wire clk1_detect,
+    input  wire clk2_detect,
+    input  wire [2:0] count1,
+    input  wire [4:0] count2,
+    output reg  [1:0] state,
+    output reg  rst_n1,
+    output reg  rst_n2,
+    output reg  enable1,
+    output reg  enable2
+);
+    localparam SAFE           = 2'b00;
+    localparam ACTIVE         = 2'b01;
+    localparam ACTIVE_Reverse = 2'b10;
 
-    //============================================================
-    // clk2 domain
-    //============================================================
-    always @(posedge clk2 or negedge rst_n2) begin
-        if (~rst_n2) begin
-            sel_clk2_ff1 <= 1'b0;
-            count1_reg   <= 3'b0;
-        end else begin
-            sel_clk2_ff1 <= enable2;
-            if (clk1)
-                count1_reg <= count1_reg + 1'b1;
-            else
-                count1_reg <= 3'b0;
-        end
-    end
+    reg [1:0] next_state;
 
-    always @(negedge clk2 or negedge rst_n2) begin
-        if (~rst_n2)
-            sel_clk2_ff2 <= 1'b0;
-        else
-            sel_clk2_ff2 <= sel_clk2_ff1;
-    end
-
-    //============================================================
-    // Clock mux
-    //============================================================
-/*    if 
-    
-    assign clk_out = clk1 & sel_clk1_ff2 | sel_clk2_ff2;
-    end*/
-
-    //============================================================
-    // FSM controlling domain resets
-    //============================================================
-    assign clk_out = (clk1 & sel_clk1_ff2) | (clk2 & sel_clk2_ff2);
-    assign clk_out1 = (~clk1 & sel_clk1_ff2) | (~clk2 & sel_clk2_ff2);
-    
-    localparam SAFE   = 1'b0;
-    localparam ACTIVE = 1'b1;
-
-    reg state, next_state;
-
-    // Next-state logic
     always @(*) begin
         case (state)
             SAFE: begin
                 if ((sel && clk1_detect) || (~sel && clk2_detect))
                     next_state = ACTIVE;
-                else 
+                else
                     next_state = SAFE;
             end
             ACTIVE: begin
-                if ((~sel && count2_reg >= 3) ||
-                    ( sel && count1_reg >= 3))
-                    next_state = SAFE;
-                else if ((sel && clk1_detect) || (~sel && clk2_detect))
+                if ((~sel && count2 >= 3) || (sel && count1 >= 3))begin
+                    next_state = ACTIVE_Reverse;
+                end else
                     next_state = ACTIVE;
+            end
+            ACTIVE_Reverse: begin
+                if ((sel && clk1_detect) || (~sel && clk2_detect))
+                    next_state = SAFE;
+                else if ((sel && count2 >= 3) || (~sel && count1 >= 3))
+                    next_state = SAFE;
+                else
+                    next_state = ACTIVE_Reverse;
             end
             default: next_state = SAFE;
         endcase
     end
 
-    // State register (use global reset)
-    always @(posedge clk1 or negedge rst_n) begin //ok delay
-        if (~rst_n)
-            state <= SAFE;
-        else
-            state <= next_state;
+    always @(posedge clk or negedge rst_n) begin
+        if (~rst_n) state <= SAFE;
+        else        state <= next_state;
     end
 
-    // Output logic for domain resets
     always @(*) begin
         case (state)
-            SAFE:   begin rst_n1 = 1'b0; rst_n2 = 1'b0; end
-            ACTIVE: begin rst_n1 = 1'b1; rst_n2 = 1'b1; end
-            default:begin rst_n1 = 1'b0; rst_n2 = 1'b0; end
+            SAFE: begin
+                rst_n1 = 1'b0; rst_n2 = 1'b0;
+                enable1 = 1'b0; enable2 = 1'b0;
+            end
+            ACTIVE: begin
+                rst_n1 = 1'b1; rst_n2 = 1'b1;
+                enable1 = sel; enable2 = ~sel;
+            end
+            ACTIVE_Reverse: begin
+                rst_n1 = 1'b1; rst_n2 = 1'b1;
+                enable1 = ~sel; enable2 = sel;
+            end
+            default: begin
+                rst_n1 = 1'b0; rst_n2 = 1'b0;
+                enable1 = 1'b0; enable2 = 1'b0;
+            end
         endcase
     end
-    assign state_dbg = state;
+endmodule
+
+//============================================================
+// Top-level structural module
+//============================================================
+module model_two_fix_enable (
+    input  wire clk1,
+    input  wire clk2,
+    input  wire sel,
+    input  wire rst_n,
+    output wire clk_out_enable,
+    output wire [2:0] count1,
+    output wire [4:0] count2,
+    output wire [1:0] state_dbg,
+    output wire rst_n1,
+    output wire rst_n2
+);
+
+    // Detect block
+    wire clk1_detect, clk2_detect;
+    clk_detect_block detect_inst (
+        .clk1(clk1), .clk2(clk2), .rst_n(rst_n),
+        .clk1_detect(clk1_detect), .clk2_detect(clk2_detect)
+    );
+
+    // FSM block (choose clk1 domain for state updates)
+    wire enable1, enable2;
+    fsm_controller fsm_inst (
+        .clk(clk1), .rst_n(rst_n), .sel(sel),
+        .clk1_detect(clk1_detect), .clk2_detect(clk2_detect),
+        .count1(count1), .count2(count2),
+        .state(state_dbg), .rst_n1(rst_n1), .rst_n2(rst_n2),
+        .enable1(enable1), .enable2(enable2)
+    );
+
+    // Counter block
+    counter_block counter_inst (
+        .clk1(clk1), .clk2(clk2),
+        .rst_n1(rst_n1), .rst_n2(rst_n2),
+        .clk1_detect(clk1_detect), .clk2_detect(clk2_detect),
+        .count1(count1), .count2(count2)
+    );
+
+    // Output enable logic
+    assign clk_out_enable = (clk1 & enable1) | (clk2 & enable2);
 
 endmodule
