@@ -1,20 +1,21 @@
+
 module dff_async (
-    input  wire clk,
-    input  wire rst_n,
-    input  wire d,
-    output reg  q
+    input wire clk,
+    input wire rst_n,
+    input wire d,
+    output reg q
 );
     always @(posedge clk or negedge rst_n) begin
         if (~rst_n) q <= 1'b0;
-        else        q <= d;
+        else q <= d;
     end
 endmodule
 
 module counter #(parameter WIDTH=4) (
-    input  wire clk,
-    input  wire rst_n,
-    input  wire inc,
-    input  wire clr,
+    input wire clk,
+    input wire rst_n,
+    input wire inc,
+    input wire clr,
     output reg [WIDTH-1:0] q
 );
     always @(posedge clk or negedge rst_n) begin
@@ -25,171 +26,131 @@ module counter #(parameter WIDTH=4) (
 endmodule
 
 module clk_detect_block (
-    input  wire clk1,
-    input  wire clk2,
-    input  wire rst_n,
+    input wire clk1,
+    input wire clk2,
+    input wire rst_n,
     output wire clk1_detect,
     output wire clk2_detect
 );
     wire clk1_d, clk2_d;
-
     dff_async u_clk1_dff (.clk(clk2), .rst_n(rst_n), .d(clk1), .q(clk1_d));
     dff_async u_clk2_dff (.clk(clk1), .rst_n(rst_n), .d(clk2), .q(clk2_d));
-
     assign clk1_detect = clk1 ^ clk1_d;
     assign clk2_detect = clk2 ^ clk2_d;
 endmodule
 
-//============================================================
-// Counter block
-//============================================================
-
-
 module counter_block (
-    input  wire clk1,
-    input  wire clk2,
-    input  wire rst_n1,
-    input  wire rst_n2,
-    input  wire clk1_detect,
-    input  wire clk2_detect,
+    input wire clk1,
+    input wire clk2,
+    input wire rst_n1,
+    input wire rst_n2,
+    input wire clk1_detect,
+    input wire clk2_detect,
     output wire [2:0] count1,
     output wire [4:0] count2
 );
     counter #(.WIDTH(3)) count1_inst (
-        .clk(clk2),
-        .rst_n(rst_n2),
-        .inc(~clk1_detect),
-        .clr(clk1_detect),
+        .clk(clk2), .rst_n(rst_n2),
+        .inc(~clk1_detect), .clr(clk1_detect),
         .q(count1)
-    );
-
+    );//need to add frequency analysis at here.
     counter #(.WIDTH(5)) count2_inst (
-        .clk(clk1),
-        .rst_n(rst_n1),
-        .inc(~clk2_detect),
-        .clr(clk2_detect),
+        .clk(clk1), .rst_n(rst_n1),
+        .inc(~clk2_detect), .clr(clk2_detect),
         .q(count2)
     );
 endmodule
 
-//============================================================
-// FSM controller with enable outputs
-//============================================================
-module fsm_controller (
-    input  wire clk,
-    input  wire rst_n,
-    input  wire sel,
-    input  wire clk1_detect,
-    input  wire clk2_detect,
-    input  wire [2:0] count1,
-    input  wire [4:0] count2,
-    output reg  [1:0] state,
-    output reg  rst_n1,
-    output reg  rst_n2,
-    output reg  enable1,
-    output reg  enable2
-);
-    localparam SAFE           = 2'b00;
-    localparam ACTIVE         = 2'b01;
-    localparam ACTIVE_Reverse = 2'b10;
-
-    reg [1:0] next_state;
-
-    always @(*) begin
-        case (state)
-            SAFE: begin
-                if ((sel && clk1_detect) || (~sel && clk2_detect))
-                    next_state = ACTIVE;
-                else
-                    next_state = SAFE;
-            end
-            ACTIVE: begin
-                if ((~sel && count2 >= 3) || (sel && count1 >= 3))begin
-                    next_state = ACTIVE_Reverse;
-                end else
-                    next_state = ACTIVE;
-            end
-            ACTIVE_Reverse: begin
-                if ((sel && clk1_detect) || (~sel && clk2_detect))
-                    next_state = SAFE;
-                else if ((sel && count2 >= 3) || (~sel && count1 >= 3))
-                    next_state = SAFE;
-                else
-                    next_state = ACTIVE_Reverse;
-            end
-            default: next_state = SAFE;
-        endcase
-    end
-
-    always @(posedge clk or negedge rst_n) begin
-        if (~rst_n) state <= SAFE;
-        else        state <= next_state;
-    end
-
-    always @(*) begin
-        case (state)
-            SAFE: begin
-                rst_n1 = 1'b0; rst_n2 = 1'b0;
-                enable1 = 1'b0; enable2 = 1'b0;
-            end
-            ACTIVE: begin
-                rst_n1 = 1'b1; rst_n2 = 1'b1;
-                enable1 = sel; enable2 = ~sel;
-            end
-            ACTIVE_Reverse: begin
-                rst_n1 = 1'b1; rst_n2 = 1'b1;
-                enable1 = ~sel; enable2 = sel;
-            end
-            default: begin
-                rst_n1 = 1'b0; rst_n2 = 1'b0;
-                enable1 = 1'b0; enable2 = 1'b0;
-            end
-        endcase
-    end
-endmodule
-
-//============================================================
-// Top-level structural module
-//============================================================
+// ================================================================
+// FIXED TOP-LEVEL MODULE (glitch-free + symmetric failover)
+// ================================================================
+//One method at here used is applying 2 flipflop for signal Clock domain crossing (CDC) to avoid metastability
 module model_two_fix_enable (
-    input  wire clk1,
-    input  wire clk2,
-    input  wire sel,
-    input  wire rst_n,
+    input wire clk1,
+    input wire clk2,
+    input wire sel,
+    input wire rst_n,
     output wire clk_out_enable,
     output wire [2:0] count1,
     output wire [4:0] count2,
-    output wire [1:0] state_dbg,
+    output wire [1:0] state_dbg,   // debug: {desired_clk1, desired_clk2}
     output wire rst_n1,
     output wire rst_n2
 );
 
-    // Detect block
+    // ==================== Detect & Counters (always running) ====================
     wire clk1_detect, clk2_detect;
     clk_detect_block detect_inst (
         .clk1(clk1), .clk2(clk2), .rst_n(rst_n),
         .clk1_detect(clk1_detect), .clk2_detect(clk2_detect)
     );
 
-    // FSM block (choose clk1 domain for state updates)
-    wire enable1, enable2;
-    fsm_controller fsm_inst (
-        .clk(clk1), .rst_n(rst_n), .sel(sel),
-        .clk1_detect(clk1_detect), .clk2_detect(clk2_detect),
-        .count1(count1), .count2(count2),
-        .state(state_dbg), .rst_n1(rst_n1), .rst_n2(rst_n2),
-        .enable1(enable1), .enable2(enable2)
-    );
-
-    // Counter block
+    wire [2:0] count1_int;
+    wire [4:0] count2_int;
     counter_block counter_inst (
         .clk1(clk1), .clk2(clk2),
-        .rst_n1(rst_n1), .rst_n2(rst_n2),
+        .rst_n1(rst_n), .rst_n2(rst_n),   // always active for detection
         .clk1_detect(clk1_detect), .clk2_detect(clk2_detect),
-        .count1(count1), .count2(count2)
+        .count1(count1_int), .count2(count2_int)
     );
 
-    // Output enable logic
+    assign count1 = count1_int;
+    assign count2 = count2_int;
+
+    // ==================== Fail signals ====================
+    wire fail1 = (count1_int >= 3);  // clk1 dead (detected by clk2 domain)
+    wire fail2 = (count2_int >= 3);  // clk2 dead (detected by clk1 domain)
+
+    // ==================== Synchronizers (2FF) ====================
+    // fail1 (clk2 → clk1)
+    wire fail1_sync1, fail1_sync2;
+    dff_async u_f1s1 (.clk(clk1), .rst_n(rst_n), .d(fail1), .q(fail1_sync1));
+    dff_async u_f1s2 (.clk(clk1), .rst_n(rst_n), .d(fail1_sync1), .q(fail1_sync2));
+
+    // fail2 created inside clk1 domain and used in clk2 domain.
+    wire fail2_sync1, fail2_sync2;
+    dff_async u_f2s1 (.clk(clk2), .rst_n(rst_n), .d(fail2), .q(fail2_sync1));
+    dff_async u_f2s2 (.clk(clk2), .rst_n(rst_n), .d(fail2_sync1), .q(fail2_sync2));
+
+    // e2 created inside clk2 domain, used in clk1 domain.
+    wire enable2_sync1, enable2_sync2;
+    dff_async u_e2s1 (.clk(clk1), .rst_n(rst_n), .d(enable2), .q(enable2_sync1));
+    dff_async u_e2s2 (.clk(clk1), .rst_n(rst_n), .d(enable2_sync1), .q(enable2_sync2));
+
+    // enable1 (clk1 → clk2)
+    wire enable1_sync1, enable1_sync2;
+    dff_async u_e1s1 (.clk(clk2), .rst_n(rst_n), .d(enable1), .q(enable1_sync1));
+    dff_async u_e1s2 (.clk(clk2), .rst_n(rst_n), .d(enable1_sync1), .q(enable1_sync2));
+
+    // ==================== Desired select (priority to sel, auto-failover) ====================
+    wire desired_clk1;  // computed in clk1 domain
+    wire desired_clk2;  // computed in clk2 domain
+    assign desired_clk1 = ( sel && ~fail1_sync2) || (~sel &&  fail2);        // fail2 native in clk1
+    assign desired_clk2 = (~sel && ~fail2_sync2) || ( sel &&  fail1);        // fail1 native in clk2
+
+    // ==================== Enable flops with glitch-free feedback + async force-disable ====================
+    reg enable1, enable2;
+
+    // clk1 domain enable (force disable when clk1 dies)
+    always @(posedge clk1 or negedge rst_n or posedge fail1) begin
+        if (fail1)          enable1 <= 1'b0;   // async force when clk1 dead
+        else if (~rst_n)    enable1 <= 1'b0;
+        else                enable1 <= desired_clk1 & ~enable2_sync2;//2 conditions: 1) just this clk lives 2) the other dies
+    end
+
+    // clk2 domain enable (force disable when clk2 dies)
+    always @(posedge clk2 or negedge rst_n or posedge fail2) begin
+        if (fail2)          enable2 <= 1'b0;
+        else if (~rst_n)    enable2 <= 1'b0;
+        else                enable2 <= desired_clk2 & ~enable1_sync2;
+    end
+
+    // ==================== Output (glitch-free gated mux) ====================
     assign clk_out_enable = (clk1 & enable1) | (clk2 & enable2);
+
+    // ==================== Debug outputs ====================
+    assign state_dbg = {desired_clk1, desired_clk2};
+    assign rst_n1    = rst_n;   // for your testbench/debug
+    assign rst_n2    = rst_n;
 
 endmodule
