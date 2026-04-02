@@ -1,4 +1,8 @@
+`timescale 1ns/1ps
 
+// ================================================================
+// Sub-modules
+// ================================================================
 module dff_async (
     input wire clk,
     input wire rst_n,
@@ -46,14 +50,14 @@ module counter_block (
     input wire rst_n2,
     input wire clk1_detect,
     input wire clk2_detect,
-    output wire [2:0] count1,
+    output wire [3:0] count1,
     output wire [4:0] count2
 );
-    counter #(.WIDTH(3)) count1_inst (
+    counter #(.WIDTH(4)) count1_inst (
         .clk(clk2), .rst_n(rst_n2),
         .inc(~clk1_detect), .clr(clk1_detect),
         .q(count1)
-    );//need to add frequency analysis at here.
+    );
     counter #(.WIDTH(5)) count2_inst (
         .clk(clk1), .rst_n(rst_n1),
         .inc(~clk2_detect), .clr(clk2_detect),
@@ -62,34 +66,35 @@ module counter_block (
 endmodule
 
 // ================================================================
-// FIXED TOP-LEVEL MODULE (glitch-free + symmetric failover)
+// Top module - Final version for paper
 // ================================================================
-//One method at here used is applying 2 flipflop for signal Clock domain crossing (CDC) to avoid metastability
 module model_two_fix_enable (
     input wire clk1,
     input wire clk2,
     input wire sel,
     input wire rst_n,
-    output wire clk_out_enable,
-    output wire [2:0] count1,
+    output wire clk_out,
+    output wire fail_test_1,
+    output wire fail_test_2,
+    output wire [3:0] count1,
     output wire [4:0] count2,
-    output wire [1:0] state_dbg,   // debug: {desired_clk1, desired_clk2}
+    output wire [1:0] state_dbg,
     output wire rst_n1,
     output wire rst_n2
 );
 
-    // ==================== Detect & Counters (always running) ====================
+    // ==================== Detect & Counters ====================
     wire clk1_detect, clk2_detect;
     clk_detect_block detect_inst (
         .clk1(clk1), .clk2(clk2), .rst_n(rst_n),
         .clk1_detect(clk1_detect), .clk2_detect(clk2_detect)
     );
 
-    wire [2:0] count1_int;
+    wire [3:0] count1_int;
     wire [4:0] count2_int;
     counter_block counter_inst (
         .clk1(clk1), .clk2(clk2),
-        .rst_n1(rst_n), .rst_n2(rst_n),   // always active for detection
+        .rst_n1(rst_n), .rst_n2(rst_n),
         .clk1_detect(clk1_detect), .clk2_detect(clk2_detect),
         .count1(count1_int), .count2(count2_int)
     );
@@ -98,59 +103,63 @@ module model_two_fix_enable (
     assign count2 = count2_int;
 
     // ==================== Fail signals ====================
-    wire fail1 = (count1_int >= 3);  // clk1 dead (detected by clk2 domain)
-    wire fail2 = (count2_int >= 3);  // clk2 dead (detected by clk1 domain)
+    wire fail1 = (count1_int >= 3) && ~clk1_detect;
+    wire fail2 = (count2_int >= 3) && ~clk2_detect;
 
-    // ==================== Synchronizers (2FF) ====================
-    // fail1 (clk2 → clk1)
+    assign fail_test_1 = fail1;
+    assign fail_test_2 = fail2;
+
+    // ==================== Fail synchronizers ====================
     wire fail1_sync1, fail1_sync2;
     dff_async u_f1s1 (.clk(clk1), .rst_n(rst_n), .d(fail1), .q(fail1_sync1));
     dff_async u_f1s2 (.clk(clk1), .rst_n(rst_n), .d(fail1_sync1), .q(fail1_sync2));
 
-    // fail2 created inside clk1 domain and used in clk2 domain.
     wire fail2_sync1, fail2_sync2;
     dff_async u_f2s1 (.clk(clk2), .rst_n(rst_n), .d(fail2), .q(fail2_sync1));
     dff_async u_f2s2 (.clk(clk2), .rst_n(rst_n), .d(fail2_sync1), .q(fail2_sync2));
 
-    // e2 created inside clk2 domain, used in clk1 domain.
-    wire enable2_sync1, enable2_sync2;
-    dff_async u_e2s1 (.clk(clk1), .rst_n(rst_n), .d(enable2), .q(enable2_sync1));
-    dff_async u_e2s2 (.clk(clk1), .rst_n(rst_n), .d(enable2_sync1), .q(enable2_sync2));
-
-    // enable1 (clk1 → clk2)
+    // ==================== Enable synchronizers ====================
     wire enable1_sync1, enable1_sync2;
+    wire enable2_sync1, enable2_sync2;
+
     dff_async u_e1s1 (.clk(clk2), .rst_n(rst_n), .d(enable1), .q(enable1_sync1));
     dff_async u_e1s2 (.clk(clk2), .rst_n(rst_n), .d(enable1_sync1), .q(enable1_sync2));
 
-    // ==================== Desired select (priority to sel, auto-failover) ====================
-    wire desired_clk1;  // computed in clk1 domain
-    wire desired_clk2;  // computed in clk2 domain
-    assign desired_clk1 = ( sel && ~fail1_sync2) || (~sel &&  fail2);        // fail2 native in clk1
-    assign desired_clk2 = (~sel && ~fail2_sync2) || ( sel &&  fail1);        // fail1 native in clk2
+    dff_async u_e2s1 (.clk(clk1), .rst_n(rst_n), .d(enable2), .q(enable2_sync1));
+    dff_async u_e2s2 (.clk(clk1), .rst_n(rst_n), .d(enable2_sync1), .q(enable2_sync2));
 
-    // ==================== Enable flops with glitch-free feedback + async force-disable ====================
-    reg enable1, enable2;
+    // ==================== Desired clock selection ====================
+    wire desired_clk1 = (sel || fail2) && ~fail1_sync2;
+    wire desired_clk2 = (~sel || fail1) && ~fail2_sync2;
 
-    // clk1 domain enable (force disable when clk1 dies)
+    // ==================== Enable flops (fast failover) ====================
+    reg enable1;
+    reg enable2;
+
     always @(posedge clk1 or negedge rst_n or posedge fail1) begin
-        if (fail1)          enable1 <= 1'b0;   // async force when clk1 dead
-        else if (~rst_n)    enable1 <= 1'b0;
-        else                enable1 <= desired_clk1 & ~enable2_sync2;//2 conditions: 1) just this clk lives 2) the other dies
+        if (fail1) enable1 <= 1'b0;
+        else if (~rst_n) enable1 <= 1'b0;
+        else enable1 <= desired_clk1 & ~enable2_sync2;
     end
 
-    // clk2 domain enable (force disable when clk2 dies)
     always @(posedge clk2 or negedge rst_n or posedge fail2) begin
-        if (fail2)          enable2 <= 1'b0;
-        else if (~rst_n)    enable2 <= 1'b0;
-        else                enable2 <= desired_clk2 & ~enable1_sync2;
+        if (fail2) enable2 <= 1'b0;
+        else if (~rst_n) enable2 <= 1'b0;
+        else enable2 <= desired_clk2 & ~enable1_sync2;
     end
 
-    // ==================== Output (glitch-free gated mux) ====================
-    assign clk_out_enable = (clk1 & enable1) | (clk2 & enable2);
+    // ==================== NOT gate BEFORE first DFF of CDC ====================
+    wire enable2_n = ~enable2;
+    wire enable1_n = ~enable1;
 
-    // ==================== Debug outputs ====================
+    // (The NOT gate is already applied above before the first DFF)
+
+    // ==================== Output ====================
+    assign clk_out = (clk1 & enable1) | (clk2 & enable2);
+
+    // ==================== Debug ====================
     assign state_dbg = {desired_clk1, desired_clk2};
-    assign rst_n1    = rst_n;   // for your testbench/debug
-    assign rst_n2    = rst_n;
+    assign rst_n1 = rst_n;
+    assign rst_n2 = rst_n;
 
 endmodule
