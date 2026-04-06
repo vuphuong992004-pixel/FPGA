@@ -1,1 +1,0 @@
-- New idea appears like we can swap clock whenever count greater or equal to 3 but clk_out must be chaotic?
