@@ -62,10 +62,11 @@
 
 \author{\IEEEauthorblockN{
     Thuan Van~Le\IEEEauthorrefmark{1},
-    Hai Minh Truong\IEEEauthorrefmark{2}\\
+    Hai Minh Truong\IEEEauthorrefmark{2},
+    Phuong Vu Thi\IEEEauthorrefmark{2}\\
 }
 \IEEEauthorblockA{
-\IEEEauthorrefmark{1}Phenikaa School of Computing, Phenikaa University \\
+%affiliate?
 \IEEEauthorrefmark{2}Faculty of Electrical and Electronic Engineering, Phenikaa School of Engineering, Phenikaa University \\
 }
 \vspace*{-1.0cm}
@@ -78,12 +79,12 @@ Dynamic and reliable switching among asynchronous clock sources is a persistent 
 \end{abstract}
 
 \begin{IEEEkeywords}
-Clock multiplexer, glitch-free switching, asynchronous clocks, failover, deadlock, metastability, FPGA, System-on-Chip (SoC), clock domain crossing, hardware reliability, fault tolerance, activity detection, synchronizer, permission-based arbitration
+Clock multiplexer, glitch-free switching, asynchronous clocks, failover, deadlock-free, FPGA, clock domain crossing
 \end{IEEEkeywords}
 
 \section{Introduction}
 
-As digital systems grow in complexity and demand greater adaptability, reliable clock switching becomes a critical concern, especially in applications such as system-on-chip (SoC) platforms and FPGA-based designs. Clock multiplexers, used to select between multiple clock sources for dynamic frequency scaling, power optimization, or fault recovery, must guaranty robust and predictable operation to maintain system integrity.
+As digital systems grow in complexity and demand greater adaptability, reliable clock switching becomes a critical concern, especially in applications such as system-on-chip (SoC) platforms and FPGA-based designs. Clock multiplexers, used to select between multiple clock sources for dynamic frequency scaling, power optimization, or fault recovery, must ensure robust and predictable operation to maintain system integrity.
 
 However, ensuring seamless and safe transitions between asynchronous clock sources is non-trivial. Conventional multiplexing methods are often vulnerable to hazardous phenomena such as output glitches (unwanted pulses generated during select transitions) and metastability (unpredictable logic states arising from asynchronous control signal crossings). These effects can compromise downstream logic, induce timing violations, and ultimately threaten system reliability.
 
@@ -161,7 +162,7 @@ This section presents the detailed architecture of the proposed glitch-free cloc
 Figure~\ref{fig:block_diagram} displays the high-level block diagram of the proposed clock multiplexer. The circuit accepts two asynchronous clock inputs \texttt{clk1}, \texttt{clk2} and a user selector \texttt{sel}, and outputs a single glitch-free clock \texttt{clk\_out}. Internally, the design is decomposed into three sequential processing layers, each with clearly delineated responsibilities:
 
 \begin{itemize}
-    \item \textbf{Layer 1: Activity Sensor} : Continuously monitors the activity of each input clock by sampling it using the other clock's domain. For each clock, a real-time health signal is generated that indicates whether that specific clock is considered failed, as observed by the opposite clock domain.
+    \item{Layer 1: Activity Sensor} : Continuously monitors the activity of each input clock by sampling it using the other clock's domain. For each clock, a real-time health signal is generated that indicates whether that specific clock is considered failed, as observed by the opposite clock domain.
     \item \textbf{Layer 2: Decision Making} : Receives the individual clock health signals from Layer 1 along with the user preference, and uses this information to dynamically select which clock should be considered for output. This layer generates “desired clock” signals, which indicate the preferred source based on current operating conditions but do not directly control the output gating logic.
     \item \textbf{Layer 3: Safe Handover} : Converts the “desired clock” signals from Layer 2 into the final output enables, guaranteeing that only one clock is active at the output at any time. It implements synchronized enable registers and mutual exclusion logic to ensure all switching is glitch-free, honoring the break-before-make principle during clock transitions.
 \end{itemize}
@@ -175,7 +176,7 @@ This modular decomposition, as visually depicted in Fig.~\ref{fig:block_diagram}
     \label{fig:block_diagram}
 \end{figure}
 \subsection{Layer 1: Activity Sensor}
-The bottom layer, \textbf{Activity Sensor}, interfaces directly with the two asynchronous clock domains. Utilizing cross-domain sampling, each clock is sampled in the other’s domain, and transitions are detected by XORing consecutive samples\cite{9217816}. A saturating synchronous counter, running in the opposing clock domain, accumulates the number of cycles since the last detected transition. If this counter exceeds a predefined threshold (set here to 3), a failure flag (\texttt{fail1} or \texttt{fail2}) is asserted for that clock. This approach robustly distinguishes between brief jitter and true clock failure, and ensures fast detection without the need for a reference clock. The outputs of this layer, \texttt{fail1} and \texttt{fail2}, abstractly represent the health status of \texttt{clk1} and \texttt{clk2}, and are passed forward in the block diagram as shown.
+The bottom layer, Activity Sensor, interfaces directly with the two asynchronous clock domains. Utilizing cross-domain sampling, each clock is sampled in the other’s domain, and transitions are detected by XORing consecutive samples\cite{9217816}. A saturating synchronous counter, running in the opposing clock domain, accumulates the number of cycles since the last detected transition. If this counter exceeds a predefined threshold (set here to 3), a failure flag (\texttt{fail1} or \texttt{fail2}) is asserted for that clock. This approach robustly distinguishes between brief jitter and true clock failure, and ensures fast detection without the need for a reference clock. The outputs of this layer, \texttt{fail1} and \texttt{fail2}, abstractly represent the health status of \texttt{clk1} and \texttt{clk2}, and are passed forward in the block diagram as shown.
 
 \subsection{Layer 2: Decision Making}
 
@@ -298,7 +299,7 @@ This work has presented a robust, glitch-free clock multiplexer architecture cap
 
 Functional verification confirmed the system’s ability to sustain seamless operation and failover across a broad range of test conditions, while FPGA implementation results on the Intel Cyclone V 5CEFA2F23C8 device demonstrated that these advanced safety features are achieved with modest resource overhead and competitive maximum frequency. Comparative analysis highlighted superior performance and resilience over established approaches, making the proposed architecture well-suited for safety-critical and high-availability digital systems.
 
-Future work may extend this framework to multiplexer designs supporting more than two clock domains or further optimize resource usage for ultra-low-power or high-speed contexts.
+Future work may extend this framework to support multiplexers with more than two clock domains, or further optimize the architecture for ultra-low-power or high-performance applications. Additional directions include adaptive thresholding for failure detection by exploiting input clock frequency ratios, as well as enhancing monitoring efficiency through resource-optimized or pseudo-randomized counter designs.
 \bibliographystyle{IEEEtran}
 \bibliography{reference}
 
