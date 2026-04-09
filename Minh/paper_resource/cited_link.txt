@@ -1,0 +1,11 @@
+cited_link paper:
+1.https://www.google.com.vn/books/edition/Clocking_in_Modern_VLSI_Systems/UZZGAAAAQBAJ?hl=en&gbpv=0
+2.https://ieeexplore.ieee.org/document/9470292
+3.https://scholar.google.com.vn/scholar?q=pga+dynamic+and+partial+reconfiguration:+A+survey+of+architectures,+methods,+and+applications,+google+book&hl=en&as_sdt=0&as_vis=1&oi=scholart
+4.https://www.google.com.vn/books/edition/Digital_Design_Principles_And_Practices/kPNtPgAACAAJ?hl=en
+5.https://ieeexplore.ieee.org/document/1199169
+6.https://www.google.com.vn/books/edition/_/ZyrjlPlpoFEC?hl=en&sa=X&ved=2ahUKEwisjtz3y-GTAxU-h68BHcCYNh8Q7_IDegQIERAG
+7.https://ieeexplore.ieee.org/document/6142332
+8.https://ieeexplore.ieee.org/document/9217816
+9.https://ieeexplore.ieee.org/abstract/document/11424085
+
