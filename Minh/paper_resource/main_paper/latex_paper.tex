@@ -1,0 +1,300 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{amsmath}
+\usepackage[top=0.75in, margin=1in, bottom=1.1in, left=0.75in, right=0.75in]{geometry}
+\usepackage{graphicx}
+\usepackage{indentfirst}
+\usepackage{cases}
+\usepackage{soul}
+\usepackage[noadjust]{cite}
+\raggedbottom
+\usepackage{flushend} 
+%\usepackage{filecontents}
+
+\renewcommand{\citedash}{--}
+\usepackage{tabularx,booktabs}
+\usepackage{makecell}
+\newcommand\norm[1]{\left\lVert#1\right\rVert}
+\newcommand{\blue}{\textcolor{blue}}
+\newcommand{\red}{\textcolor{red}}
+\newcolumntype{C}{>{\centering\arraybackslash}X} % centered version of "X" type
+\setlength{\extrarowheight}{1pt}
+%\usepackage{lipsum}
+%\usepackage{fancyhdr}
+\usepackage[justification=centering]{caption}
+\captionsetup[figure]{name={Fig.},labelsep=period}
+\usepackage{amsthm,amsmath,amssymb,mathtools,bm,etoolbox}
+\usepackage{color}
+\usepackage{array}
+\usepackage{mathtools}
+\usepackage[british]{babel}
+\usepackage{csquotes}
+\usepackage{nccmath}
+%\usepackage{gensymb}
+\usepackage[shortlabels]{enumitem}
+\usepackage[nodisplayskipstretch]{setspace}
+%\usepackage[fancy]{titlesec}
+%\titlespacing{\section}{0pt}{\parskip}{-\parskip}
+%\usepackage{indentfirst}
+%\usepackage{amsthm}
+\newtheorem{remark}{Remark}
+%\renewcommand{\algorithmicrequire}{\textbf{Input:}}
+%\renewcommand{\algorithmicensure}{\textbf{Output:}}
+\usepackage[ruled,linesnumbered]{algorithm2e}
+\SetKwData{Left}{left}
+\SetKwData{This}{this}
+\SetKwData{Up}{up}
+\SetKwInOut{Input}{Input}
+\SetKwInOut{Output}{Output}
+\RestyleAlgo{ruled}
+\SetKwComment{Comment}{/* }{ */}
+\usepackage{fancyhdr}
+%\fancypagestyle{firstpage}{
+%    \fancyfoot[L]{979-8-3315-6871-9/25/\$31.00 ©2025 IEEE}
+%    \renewcommand{\headrulewidth}{0pt}
+%}
+\setstretch{1.5}
+\setlength{\parskip}{0cm}
+\setlength{\parindent}{1em}
+\linespread{0.95}
+
+
+\pagestyle{empty}
+\begin{document}
+
+\title{Glitch-Free Clock Multiplexer with Active Decision Logic, Symmetric Failover and Safe Recovery for Multi-Clock SoC Systems}
+
+
+\author{\IEEEauthorblockN{
+    Hai Minh Truong\IEEEauthorrefmark{1},
+    Phuong Vu Thi\IEEEauthorrefmark{1},
+    Thuan Van~Le\IEEEauthorrefmark{1}\\
+}
+\IEEEauthorblockA{
+\IEEEauthorrefmark{1}Faculty of Electrical and Electronic Engineering, Phenikaa School of Engineering, Phenikaa University \\
+}
+\vspace*{-1.0cm}
+}
+
+\maketitle
+
+\begin{abstract}
+Dynamic and reliable switching among asynchronous clock sources is a persistent hurdle in advanced system-on-chip (SoC) and field-programmable gate array (FPGA) systems, where conventional clock multiplexers frequently suffer from glitches, metastability, or deadlock, especially when a clock source unexpectedly halts. This work introduces a glitch-free clock multiplexer architecture featuring autonomous and symmetric failover, permission-driven selection logic, and integrated activity sensing across clock domains. By combining cross-domain activity detection, a permission-based arbitration scheme, and a two-stage synchronizer with an augmented edge-capture mechanism, the design ensures clean, deterministic handover and robust system recovery without requiring an external reference clock. Asynchronous force-disable paths further support safe transitions under the failure cases studied in this work. Comprehensive simulation and FPGA prototyping on Intel Cyclone V validate the architecture’s effectiveness across normal operations, clock failures, and recovery events, with resource consumption of 14 adaptive logic modules (ALMs) and up to 515.46\,MHz operating frequency. Compared to timer-based and cross-coupled designs, the proposed solution enhances resiliency and determinism while maintaining a compact hardware footprint.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Clock multiplexer, glitch-free switching, asynchronous clocks, failover, deadlock-free, FPGA, clock domain crossing
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+As digital systems grow in complexity and demand greater adaptability, reliable clock switching becomes a critical concern, especially in applications such as SoC platforms and FPGA-based designs \cite{Xanthopoulos2009}. Clock multiplexers, used to select between multiple clock sources for dynamic frequency scaling, power optimization, or fault recovery \cite{9470292}, must ensure robust and consistent operation to preserve system integrity \cite{vipin2018fpga}.
+
+A basic clock multiplexer can be implemented with simple combinational logic, as shown in the top of Fig.~\ref{fig:andor_mux_glitch_combined} \cite{wakerly2006digital}. The selection is governed by a digital control signal; for example, when the selector is low ($\texttt{sel}=0$), the output \texttt{clk\_out} follows the first clock input (\texttt{clk1}), and when the selector is high ($\texttt{sel}=1$), it switches to the second input (\texttt{clk2}). While this approach is straightforward and area-efficient, its direct and unsynchronized nature gives rise to significant reliability hazards when switching between asynchronous clock domains.
+
+\subsection{Problem Definition}
+
+The conventional multiplexer design is prone to several critical failure modes. First is the generation of glitches, which are unintended, short-lived pulses at the output. This phenomenon typically occurs when the \texttt{sel} signal changes while the input clocks are active, creating a race condition in the logic. The circled region in Fig.~\ref{fig:andor_mux_glitch_combined} illustrates such a spurious spike \cite{1199169}, which can easily violate the timing requirements of downstream logic. Second, metastability can occur when the asynchronous \texttt{sel} signal is sampled too close to a clock edge, causing an indeterminate state that can propagate through the system. While this risk is commonly mitigated by passing the control signal through a two-stage flip-flop synchronizer, eliminating it entirely remains a challenge in high-speed designs. Finally, deadlock represents a catastrophic failure where the output becomes permanently stuck at a fixed logic level. As shown by the waveform in Fig.~\ref{fig:bbm_mux_combined}, this can happen if a selected clock halts in a high state, preventing the multiplexer from switching to an alternate clock and rendering the system unresponsive.
+
+\subsection{Related Work}
+\label{sec:related_work}
+
+Prior architectures have been developed to address these issues. The break-before-make (BBM) technique \cite{harris2012digital}, often implemented using cross-coupled flip-flops, was introduced to address the fundamental shortcomings of simpler combinational approaches, which are vulnerable to both metastability and glitches during clock transitions. By ensuring that only one clock enable is ever active during handover, BBM architectures effectively eliminate the risk of metastability and thus provide a substantial improvement in operational robustness \cite{6142332}. However, despite its simplicity and effectiveness in resolving metastability, BBM does not fully address the glitch problem in all failure scenarios. In particular, if the selected clock halts while remaining in a high state, the output \texttt{clk\_out} can become locked at logic high, failing to switch to a viable clock source and resulting in a deadlock condition. This vulnerability is illustrated in the lower part of Fig.~\ref{fig:bbm_mux_combined}, where the output remains stuck until the faulted clock resumes toggling. Thus, while BBM markedly advances reliability compared to earlier designs, it remains susceptible to output glitches and deadlock in the presence of certain clock failures, motivating the need for an even more robust solution.
+
+
+
+Timer-based (watchdog) clock multiplexers \cite{9217816} represent a significant improvement over BBM solutions through their use of dedicated timers to detect stalled clock domains, as illustrated in Fig.~\ref{fig:timer_mux_combined}. When inactivity is detected, these circuits force the output to a defined safe state (typically logic Low) by asserting a reset, effectively eliminating the risk of deadlock when a clock halts high. In particular, if the selected clock resumes toggling after a fault, the timer-based approach can automatically recover so that \texttt{clk\_out} follows the recovered clock without further user intervention. However, the principal limitation of timer-based designs lies in their passive handover policy. If the selected clock fails and the selector signal (\texttt{sel}) remains unchanged, the output is merely forced to the safe state and does not transfer to an alternate live clock source. Only by either toggling the selector or waiting for the original clock to recover does normal operation resume. This lack of autonomous, immediate switchover to any available healthy clock restricts the system's applicability for high-availability or fail-operational scenarios, where uninterrupted output is essential. Furthermore, timer-based implementations incur a performance penalty, as their frequency of operation (maximum $F_{\max}$) is typically limited by the additional logic and constraints introduced by the watchdog circuits.
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.70\linewidth]{trad_model/trad_model_third.drawio.pdf}
+    \vfill
+    \includegraphics[width=1\linewidth]{trad_model/trad_prob.png}
+    \caption{Traditional AND/OR-based clock multiplexer: logic structure (top); waveform demonstrating output glitch caused by select changes during active clocks (bottom).}
+    \label{fig:andor_mux_glitch_combined}
+\end{figure}
+Recent multi-clock and clock-domain crossing (CDC) work also stresses safe handoff for stopped or gated clocks \cite{9470292,6142332,11424085}.
+
+\subsection{Motivation for This Work}
+
+The prior architectures each tackle select failure modes: combinational designs offer simplicity, BBM methods suppress glitches, and timer-based schemes add forced-safe outputs with some recovery. However, none alone achieves glitch immunity, deadlock freedom, and fully autonomous, immediate switchover to any healthy clock source.
+
+Motivated by these gaps, our work aims to create a holistic solution with two primary objectives. The first is to implement fully autonomous failover, allowing the multiplexer to intelligently switch to a live clock source upon failure without any external intervention. The second is to enforce a safe-state condition, forcing the output to a stable logic low during the rare but critical event that both input clocks become inactive. Our architecture intentionally integrates the advantages of prior designs while overcoming their limitations, enabling robust failure detection, rapid switchover, and high-frequency operation within a single, unified framework.
+
+\subsection{Paper Organization}
+The remainder of this paper is organized as follows. Section~\ref{sec:proposed_architecture} presents the detailed three-layered design of the proposed clock multiplexer. Section~\ref{sec:results} provides simulation results to verify its functional correctness and presents a comparative analysis of its FPGA implementation performance. Finally, Section~\ref{sec:conclusion} concludes the paper and suggests directions for future work.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=1\linewidth]{break_before_make_model/break_before_make_model_fifth.drawio.pdf}
+    \vfill
+    \includegraphics[width=1\linewidth]{break_before_make_model/break_before_make_strength_prob.png}
+    \caption{Break-before-make multiplexer: cross-coupled flip-flop schematic (top); deadlock when a selected clock halts while high (bottom).}
+    \label{fig:bbm_mux_combined}
+\end{figure}
+
+
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=1\linewidth]{timer_based_model/timer_based_sys_two.drawio.pdf}
+    \vfill
+    \includegraphics[width=1\linewidth]{timer_based_model/timer_base_prob.png}
+    \caption{Timer-based multiplexer: schematic with timers per clock source (top); waveform showing recovery upon selector change after clock failure (bottom).}
+    \label{fig:timer_mux_combined}
+\end{figure}
+
+
+\section{Proposed Architecture}
+\label{sec:proposed_architecture}
+
+This section presents the detailed architecture of the proposed glitch-free clock multiplexer (GFCM). The system is composed of three functionally distinct but closely interconnected layers, as illustrated in Fig.~\ref{fig:block_diagram}. This layered approach enables rapid failover and reliable, glitch-free operation during clock transitions. A key aspect of the design is its inherent safety during catastrophic failure scenarios, including the simultaneous loss of both input clocks. In a staggered dual-clock failure, the Activity Sensor asserts a \texttt{fail} signal upon detecting the first stopped clock. This \texttt{fail} signal propagates to the Safe Handover layer, forcing \texttt{clk\_out} to a safe logic-low state even if the second clock subsequently fails. However, in the rare simultaneous failure case, where both clocks stop within the same detection window, neither counter can detect activity from the other domain, so no \texttt{fail} signal is asserted. Consequently, \texttt{clk\_out} safely holds its last valid state. This hold-state remains stable and deadlock-free until activity is detected from at least one clock, at which point the architecture autonomously recovers. Table~\ref{tab:comparison} marks this as Partial dual-stop under reciprocal sensing (Figs.~\ref{fig:simu_dual_failure} and~\ref{fig:simu_failover_recovery}).
+
+
+\subsection{System Overview}
+
+Figure~\ref{fig:block_diagram} displays the high-level block diagram of the proposed clock multiplexer. The circuit accepts two asynchronous clock inputs, \texttt{clk1} and \texttt{clk2}, and a user selector, \texttt{sel}, to produce a single, glitch-free output, \texttt{clk\_out}. Internally, the design is decomposed into three sequential processing layers, each with clearly delineated responsibilities.
+
+The first layer, the Activity Sensor, continuously monitors the health of each input clock by sampling it within the other clock's domain, generating real-time status signals that indicate if a clock has failed. These status signals are passed to the second layer, the Decision Making logic, which combines the health information with the user's preference to dynamically select the most appropriate clock source. This layer generates "desired clock" signals that represent the system's intent but do not directly control the output. Finally, the third layer, Safe Handover, receives this intent and converts it into the final output enables. It implements synchronized enable registers and mutual exclusion logic to ensure that switching is glitch-free and honors the break-before-make principle during all transitions.
+
+This modular decomposition, as visually depicted in Fig.~\ref{fig:block_diagram}, clarifies both the dataflow and the control dependencies of the system, and forms the basis for ease of analysis and future extensibility. Signal names in Figs.~\ref{fig:block_diagram} and~\ref{fig:schematic_diagram} match the register-transfer level (RTL) netlist (\texttt{fail1}/\texttt{fail2}, \texttt{desired\_clk*}, \texttt{enable*}, \texttt{clk\_out}).
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.35\textwidth]{Proposed_model_and_proven/Proposed_block_diagram_glitch_one.drawio (1).pdf}
+    \caption{Block diagram of the proposed clock multiplexer. Layer~1 reports \texttt{fail1}/\texttt{fail2}; Layer~2 forms \texttt{desired\_clk1}/\texttt{desired\_clk2}; Layer~3 drives \texttt{enable1}/\texttt{enable2} to produce \texttt{clk\_out}.}
+    \label{fig:block_diagram}
+\end{figure}
+
+
+\subsection{Layer 1: Activity Sensor}
+The Activity Sensor layer interfaces directly with the two asynchronous clock domains. Utilizing cross-domain sampling, each clock is sampled in the other’s domain, and transitions are detected by XORing consecutive samples \cite{9217816}. A saturating synchronous counter, running in the opposing clock domain, accumulates the number of cycles since the last detected transition. If this counter exceeds a predefined threshold (set here to three cycles), a failure flag (\texttt{fail1} or \texttt{fail2}) is asserted for that clock. Three cycles reduce false fails from brief sampling gaps while still detecting a true stall; if both clocks fail at once, neither \texttt{fail} can assert.
+
+
+
+
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{Proposed_model_and_proven/Proposed_glitch_sche_fifth.drawio.pdf}
+    \caption{Schematic of the proposed dual-clock GFCM (read top/bottom as the two domains). Left of the dotted line: Layer~1 activity sensors produce \texttt{fail1}/\texttt{fail2}. Center: Layer~2 decision blocks combine those flags with \texttt{sel} into \texttt{desired\_clk1}/\texttt{desired\_clk2}. Right (Layer~3): enable signals are synchronized across domains, forced mutually exclusive (break-before-make), then AND-gated with \texttt{clk1}/\texttt{clk2} and OR-combined to form \texttt{clk\_out}. Crossed wires between domains carry the synchronized enables used for mutual exclusion.}
+    \label{fig:schematic_diagram}
+\end{figure*}
+
+\subsection{Layer 2: Decision Making}
+
+The Decision Making layer is responsible for the real-time assessment and selection of the appropriate clock source. Its operation is governed by a clear policy that uses the health status from Layer 1 (\texttt{fail1}, \texttt{fail2}) and the user's selection preference (\texttt{sel}) to determine the system's intent.
+
+The policy prioritizes the clock chosen by the user, as long as it is functioning correctly. If the preferred clock fails while the alternate clock remains active, the logic immediately overrides the user's choice and designates the healthy clock as the desired source, enabling autonomous failover. Furthermore, if a failure is detected for both clocks (as in a staggered failure), this layer de-asserts both "desired clock" signals. This action is critical for driving the output to a safe, quiescent state, a process finalized by Layer 3. It is important to note that this layer's ability to command a safe state is entirely dependent on receiving at least one \texttt{fail} signal from Layer 1. In the rare case of a perfectly simultaneous failure where no \texttt{fail} signals are generated, this layer will be unaware of the fault and will not change its output. Throughout all operational modes, Layer 2 continually produces the "desired clock" signals that guide the final handover logic, ensuring a robust and rapid response to changing system conditions.
+
+
+
+
+% In your document preamble (before \begin{document}), make sure you have this package:
+% \usepackage{booktabs}
+
+% In your document preamble (before \begin{document}), make sure you have this package:
+% \usepackage{booktabs}
+
+
+\subsection{Layer 3: Safe Handover}
+
+The final layer, Safe Handover, is responsible for safely implementing the clock selection determined by the Decision Making layer. Its core objective is to ensure glitch-free, mutually exclusive switching between the two clock sources, guaranteeing that only one source is ever enabled at a time and that transitions do not cause spurious output or timing hazards. This is accomplished through several key mechanisms, whose high-level arrangement is shown in Fig.~\ref{fig:block_diagram} and whose detailed implementation is provided in Fig.~\ref{fig:schematic_diagram}.
+
+First, the "desired clock" signals from Layer 2 are passed through dedicated flip-flop stages within their respective clock domains. These synchronizers are crucial for aligning the enable signals safely to each clock, pipelining the logic for improved timing, and ensuring enables only change on stable clock edges. This approach prevents the hazards common to direct combinational gating.
+
+Second, mutual exclusion logic ensures that both output enables can never be active simultaneously. This enforces a strict break-before-make switching protocol, which produces clean, monotonic transitions at the output without the risk of contention.
+
+Finally, the output gating logic provides a safe output state by holding \texttt{clk\_out} low whenever no valid clock is available, such as when both inputs are inactive or a reset is asserted. By integrating enable synchronization, mutual exclusion, and safe-state handling, this layer provides a robust framework for all clock switching operations.
+
+Having described the three layers, we briefly note their hardware cost. On the target FPGA (Table~\ref{tab:comparison}), GFCM uses 14~ALMs (24~ALUTs, 22~DLRs), mainly Layer~1 sensing and Layer~3 enables. Versus BBM (3~ALMs), this modest increase purchases autonomous failover without large watchdogs or a third reference clock.
+
+\vspace{0.5em}
+In summary, the architecture provides glitch-free handover, autonomous failover, and safe staggered dual-stop behavior under the reciprocal-sensing assumptions above. The high-level structure is shown in Fig.~\ref{fig:block_diagram}.
+
+
+
+
+
+To provide deeper insight into the practical realization of these mechanisms, the complete logic is detailed in the accompanying schematic diagram, as depicted in Fig.~\ref{fig:schematic_diagram}. This schematic reveals the precise signal paths, flip-flop stages, and gating elements that implement each architectural function, clarifying how abstract principles are mapped to concrete hardware. Readers are encouraged to refer to this diagram for a comprehensive understanding of the internal circuitry and to see how each conceptual block is instantiated in the final design.
+
+
+\section{Results and Evaluation}
+\label{sec:results}
+
+\subsection{Simulation and Functional Verification}
+
+To validate the correctness and reliability of the proposed design, a comprehensive functional verification was performed. The architecture was modeled in Verilog, and a dedicated testbench was developed to generate the stimulus for a range of critical scenarios. This testbench instantiates the proposed clock multiplexer as the Design Under Test (DUT) and uses procedural blocks to precisely control the behavior of the input clocks, selector, and reset signals. The resulting waveforms confirm the architecture's robustness in both failover and recovery scenarios.
+
+The simulation waveform in Fig.~\ref{fig:simu_failover_recovery} demonstrates the system's nuanced handling of multiple, complex failure and recovery scenarios. The first circled region highlights the architectural corner case where \texttt{clk1} fails, followed by \texttt{clk2} failing shortly thereafter. Because the time between the two failures is less than the detection threshold, the system does not assert a \texttt{fail} signal and the output (\texttt{clk\_out}) correctly holds its last valid state. The second circled region shows the system's primary failover mechanism: when the selected clock (\texttt{clk1}) fails while the alternate (\texttt{clk2}) remains active, the output seamlessly switches to track \texttt{clk2}. Finally, the third circled region demonstrates automatic recovery, where the output returns to tracking the originally selected clock (\texttt{clk1}) as soon as it resumes toggling after its period of inactivity. This single waveform validates the design's ability to handle autonomous switching, hold-state on near-simultaneous failure, and full recovery, confirming its comprehensive robustness.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=1\linewidth]{Proposed_model_and_proven/sit_1_2_proposed_sys.png}
+    \caption{Simulation demonstrating the system's key autonomous behaviors, showing the output holding its last state during a near-simultaneous failure (first circle), performing a seamless failover to the alternate clock (second circle), and automatically recovering to the primary clock upon its return (third circle).}
+    \label{fig:simu_failover_recovery}
+\end{figure}
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=1\linewidth]{Proposed_model_and_proven/sit_3_proposed_sys.png}
+    \caption{Simulation of a staggered dual-clock failure. The system detects the failure of the first clock and, as shown in the circle, safely forces the output to logic low before the second clock also fails.}
+    \label{fig:simu_dual_failure}
+\end{figure}
+Figure~\ref{fig:simu_dual_failure} presents the critical test case of a staggered dual-clock failure. Here, the selected clock (\texttt{clk2}) fails first. Critically, there is a sufficient time delay before the alternate clock (\texttt{clk1}) also fails, allowing the Activity Sensor in the \texttt{clk1} domain to detect the failure of \texttt{clk2}. This triggers a \texttt{fail2} signal, which commands the Decision Making layer to de-assert all "desired clock" signals. As shown in the circled region, this action correctly forces the output \texttt{clk\_out} to a safe, logic-low state before the entire system halts. This result validates the design's ability to handle staggered dual-failures gracefully, a scenario where many conventional designs would fail unpredictably. This behavior is distinct from the theoretical case of a perfectly simultaneous failure, where the output would hold its last state as described in Section~\ref{sec:proposed_architecture}.
+
+
+
+Collectively, these simulations validate the complete operational spectrum of the proposed architecture. The results confirm its ability to not only handle standard failover and recovery, but also to behave deterministically and safely in both staggered and near-simultaneous dual-failure corner cases. This proven robustness in complex fault scenarios demonstrates a clear advantage in safety and reliability over conventional clock-switching designs.
+
+\begin{table*}[t]
+    \centering
+    \setlength{\tabcolsep}{3pt}
+    \caption{Feature and Implementation Comparison for Various Clock Multiplexer Designs.}
+    \label{tab:comparison}
+    % The '|' characters in the line below add the vertical separators
+    \begin{tabular}{|l|c|c|c|c|l|c|c|c|c|c|}
+    \hline
+    \textbf{Design} & 
+    \makecell[l]{\textbf{Glitch-}\\\textbf{Free}} & 
+    \makecell[l]{\textbf{Ref. Clock}} & 
+    \makecell[l]{\textbf{Deadlock-}\\\textbf{Free}} & 
+    \makecell[l]{\textbf{Dual-Stop}\\\textbf{Safety}} & 
+    \makecell[l]{\textbf{Latency}\\\textbf{Bound}} & 
+    \textbf{ALMs} & \textbf{LABs} & \textbf{ALUTs} & \textbf{DLRs} & 
+    \makecell[l]{\textbf{Max Freq.}\\\textbf{(MHz)}} \\
+    \hline
+    \makecell[l]{Break-before-make \\ \cite{harris2012digital, 1199169}} & Yes & No & No & No & Constant & 3 & 2 & 4 & 6 & 580.05 \\
+    \hline
+    \makecell[l]{Timer-based \\ \cite{9217816}} & Yes & No & Yes & No & Freq.-dep. & 12 & 4 & 5 & 10 & 367.92 \\
+    \hline
+    \makecell[l]{Clock-ref-based \\ \cite{11424085}} & Yes & Yes & Yes & Yes & Constant & {27} & {4} & {51} & {41} & {352.61} \\
+    \hline
+    \makecell[l]{{Proposed GFCM}} & {Yes} & {No} & {Yes} & {Partial\textsuperscript{*}} & {Constant} & {14} & {3} & {24} & {22} & {515.46} \\
+    \hline
+    \end{tabular}
+
+    \footnotesize
+    \textsuperscript{*}~The proposed GFCM provides full dual-stop safety (forces \texttt{clk\_out} to logic low) for staggered failures via the \texttt{fail} signal. In the rare simultaneous failure case (both clocks stop within the same detection window), no \texttt{fail} signal is asserted and \texttt{clk\_out} safely holds its last valid state until at least one clock recovers.
+\end{table*}
+
+\subsection{FPGA Implementation and Resource Utilization}
+
+To evaluate performance and cost, all architectures were designed in Verilog HDL and synthesized for an Intel Cyclone V 5CEFA2F23C8 FPGA. The measured resource utilization, including Adaptive Logic Modules (ALMs), Logic Array Blocks (LABs), Adaptive Look-Up Tables (ALUTs), and Dedicated Logic Registers (DLRs)\footnote{These terms refer to key FPGA resources: ALUTs are the basic combinational logic elements; DLRs are the flip-flops; ALMs are the fundamental building blocks containing both ALUTs and DLRs; and LABs are clusters of multiple ALMs.}, is summarized in Table~\ref{tab:comparison}. This allows for a direct comparison under consistent tool and device conditions.
+
+The results in Table~\ref{tab:comparison} reveal a clear progression in clock multiplexer design, highlighting the trade-offs between area, performance, and functional safety. The conventional BBM architecture \cite{harris2012digital} is the most area-efficient (3 ALMs) but provides no safety guarantees beyond being glitch-free. The timer-based approach \cite{9217816} adds deadlock-free capability but does so at the cost of increased area (12 ALMs) and a lower maximum frequency.
+The clock-reference-based design \cite{11424085} provides full dual-stop safety, but depends on a third continuously running reference clock and consumes 27~ALMs.
+
+In contrast, the proposed GFCM reaches a similar safety level without that reference clock at 14~ALMs and 515.46\,MHz, well above the timer- and reference-based designs and close to simple BBM. The high $F_{\max}$ follows from the lightweight three-layer structure, which can later support more clock sources. The design is structural Verilog and needs no dedicated phase-locked loop (PLL) or third free-running reference clock, so implementation effort is similar to a conventional BBM multiplexer (standard CDC checks and \texttt{rst\_n} for integration).
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper has presented a robust, fully autonomous GFCM architecture designed for high-reliability systems. The proposed design advances the state-of-the-art by providing a complete safety solution that ensures glitch-free switching, deadlock-free operation, automatic recovery, and critically, safe handling of staggered dual-stop events and deterministic hold-state behavior under perfectly simultaneous clock loss, all without the need for an external reference clock.
+
+Functional verification through simulation confirmed the architecture's correct behavior across a range of complex fault scenarios, including both staggered and near-simultaneous clock failures. The proposed GFCM achieves the highest level of functional safety while operating at a maximum frequency of 515.46\,MHz, which is significantly faster than other designs that offer a subset of these safety features. This demonstrates a superior trade-off, delivering maximum reliability and high performance with only a modest resource cost, and eliminating the system-level dependency on a third reference clock required by other safe designs. It can also be applied in multi-clock SoCs that switch or recover among oscillators under power gating or domain failure, while keeping a glitch-free \texttt{clk\_out}. Future work includes multi-way multiplexing and adaptive failure-detection thresholds~\cite{s20072103}.
+
+\bibliographystyle{IEEEtran}
+\bibliography{reference}
+
+
+
+\end{document}
